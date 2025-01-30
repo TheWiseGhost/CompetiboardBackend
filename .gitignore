@@ -1,0 +1,64 @@
+# Byte-compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyd
+*.pyc
+
+# Environment variables and secrets
+.env
+*.env
+
+# Django-specific
+db.sqlite3
+*.log
+*.pot
+*.py[cod]
+
+# Django migrations
+*/migrations/*
+!*/migrations/__init__.py
+
+# static files and media
+staticfiles/
+media/
+
+# MySQL database files
+*.sql
+*.sqlite3
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Test and coverage files
+.coverage
+*.cover
+*.tox
+.nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Pipenv and Poetry
+Pipfile.lock
+poetry.lock
+
+# Virtual environments
+venv/
+ENV/
+env/
+.env
+venv.bak/
+ENV.bak/
+*.egg-info/
+
+# pytest
+.cache/
