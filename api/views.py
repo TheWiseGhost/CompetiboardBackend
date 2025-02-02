@@ -120,3 +120,80 @@ def board_options(req):
     except Exception as e:
         print(traceback.format_exc())
         return JsonResponse({'error': str(e)}, status=500)
+    
+
+@csrf_exempt
+def add_board(req):
+    try:
+        print('recieved')
+        clerk_id = req.POST.get('clerk_id')
+        title = req.POST.get('title')
+        my_file = req.FILES['file']
+
+        date = datetime.datetime.today()
+
+        key = f'thumbnails/{clerk_id}_{my_file.name}'
+
+        s3.upload_fileobj(
+            my_file,   # Local file path
+            bucket_name,    
+            key,
+            ExtraArgs={'ACL': 'public-read'}
+        )
+
+        s3_url = f"https://{bucket_name}.s3.amazonaws.com/{key}"
+        
+
+        if not clerk_id:
+            print('No ClerkID')
+            return JsonResponse({'error': 'clerk_id is required'})
+        
+        user = users_collection.find_one({'clerk_id': clerk_id})
+        if not user:
+            print('No User')
+            return JsonResponse({'error': 'User not found'})
+
+
+        data = {
+            "creator_id": clerk_id, 
+            "creator_name": user['name'],
+            "method": "Sheet",
+            "api": {},
+        }
+
+        created_data = data_collection.insert_one(data)
+
+        data_id = created_data.inserted_id
+
+        board = {
+            "creator_id": clerk_id,
+            "creator_name": user['name'],
+            'title': title,
+            "created_at": date,
+            "domain": "",
+            "published": False,
+            "thumbnail": s3_url, 
+            "data": str(data_id),
+        }
+
+        created_board = boards_collection.insert_one(board)
+
+        # Get the ObjectId of the inserted board document
+        board_id = created_board.inserted_id
+
+        data_collection.update_one(
+            {'_id': data_id},
+            {'$set': {'board_id': str(board_id)}}
+        )
+
+        users_collection.update_one(
+            {'clerk_id': clerk_id},
+            {'$inc': {'num_boards': 1}}
+        )
+
+        return JsonResponse({'success': True}, status=200)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({'error': str(e)}, status=500)
