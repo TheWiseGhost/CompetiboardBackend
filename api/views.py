@@ -197,3 +197,68 @@ def add_board(req):
     except Exception as e:
         print(traceback.format_exc())
         return JsonResponse({'error': str(e)}, status=500)
+    
+
+@csrf_exempt
+def update_data(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        method = data.get("method")
+        api_data = data.get("data", {})
+        
+        if not board_id or not clerk_id or not method:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_data = data_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
+        if not existing_data:
+            return JsonResponse({"error": "Data document not found"}, status=404)
+        
+        # Update the document
+        update_result = data_collection.update_one(
+            {"board_id": board_id, "creator_id": clerk_id},
+            {"$set": {"method": method, "api": api_data}}
+        )
+        
+        if update_result.modified_count == 0:
+            return JsonResponse({"error": "No changes made"}, status=400)
+        
+        return JsonResponse({"success": True, "message": "Data updated successfully"}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+@csrf_exempt
+def data_details(request):
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        
+        if not board_id or not clerk_id:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_data = data_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
+        if not existing_data:
+            return JsonResponse({"error": "Data document not found"}, status=404)
+        
+        existing_data['_id'] = str(existing_data['_id'])
+        
+        return JsonResponse({"data": existing_data}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+
