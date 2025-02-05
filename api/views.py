@@ -157,8 +157,11 @@ def add_board(req):
         data = {
             "creator_id": clerk_id, 
             "creator_name": user['name'],
-            "method": "Sheet",
+            "source": "Sheet",
             "api": {},
+            "filter_settings": {},
+            "date_settings": {},
+            "method": {}
         }
 
         created_data = data_collection.insert_one(data)
@@ -200,7 +203,7 @@ def add_board(req):
     
 
 @csrf_exempt
-def update_data(request):
+def update_data_source(request):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid request method"}, status=405)
     
@@ -208,10 +211,10 @@ def update_data(request):
         data = json.loads(request.body)
         board_id = data.get("board_id")
         clerk_id = data.get("clerk_id")
-        method = data.get("method")
+        source = data.get("source")
         api_data = data.get("data", {})
         
-        if not board_id or not clerk_id or not method:
+        if not board_id or not clerk_id or not source:
             return JsonResponse({"error": "Missing required fields"}, status=400)
         
         # Find the existing data document
@@ -222,7 +225,7 @@ def update_data(request):
         # Update the document
         update_result = data_collection.update_one(
             {"board_id": board_id, "creator_id": clerk_id},
-            {"$set": {"method": method, "api": api_data}}
+            {"$set": {"source": source, "api": api_data}}
         )
         
         if update_result.modified_count == 0:
@@ -236,6 +239,84 @@ def update_data(request):
         print(traceback.format_exc())
         return JsonResponse({"error": str(e)}, status=500)
     
+
+@csrf_exempt
+def update_data_settings(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        filter_settings = data.get("filter_settings", {})
+        date_settings = data.get("date_settings", {})
+        expression = data.get("expression", {})
+        method = data.get("method")
+        
+        if not board_id or not clerk_id or not filter_settings or not date_settings or not method:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_data = data_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
+        if not existing_data:
+            return JsonResponse({"error": "Data document not found"}, status=404)
+        
+        # Update the document
+        update_result = data_collection.update_one(
+            {"board_id": board_id, "creator_id": clerk_id},
+            {"$set": {"method": method, "filter_settings": filter_settings, "date_settings": date_settings, "expression": expression}}
+        )
+        
+        if update_result.modified_count == 0:
+            return JsonResponse({"error": "No changes made"}, status=400)
+        
+        return JsonResponse({"success": True, "message": "Data updated successfully"}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+
+@csrf_exempt
+def update_display(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        settings = data.get("settings")
+        
+        if not board_id or not clerk_id or not settings:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_board = boards_collection.find_one({"_id": ObjectId(board_id), "creator_id": clerk_id})
+        if not existing_board:
+            return JsonResponse({"error": "Board document not found"}, status=404)
+        
+        # Update the document
+        update_result = boards_collection.update_one(
+            {"_id": ObjectId(board_id), "creator_id": clerk_id},
+            {"$set": {"display": settings}}
+        )
+        
+        if update_result.modified_count == 0:
+            return JsonResponse({"error": "No changes made"}, status=400)
+        
+        return JsonResponse({"success": True, "message": "Data updated successfully"}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 def data_details(request):
@@ -255,6 +336,32 @@ def data_details(request):
         existing_data['_id'] = str(existing_data['_id'])
         
         return JsonResponse({"data": existing_data}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+@csrf_exempt
+def board_details(request):
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        
+        if not board_id or not clerk_id:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_board = boards_collection.find_one({"_id": ObjectId(board_id), "creator_id": clerk_id})
+        if not existing_board:
+            return JsonResponse({"error": "Board document not found"}, status=404)
+        
+        existing_board['_id'] = str(existing_board['_id'])
+        
+        return JsonResponse({"data": existing_board}, status=200)
     
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
