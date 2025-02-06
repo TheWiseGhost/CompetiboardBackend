@@ -14,6 +14,10 @@ from pymongo import MongoClient
 import json
 import re
 import stripe
+import gspread
+from supabase import create_client, Client
+import firebase_admin
+from firebase_admin import credentials, firestore, initialize_app
 
 
 client = MongoClient(f'{settings.MONGO_URI}')
@@ -369,3 +373,121 @@ def board_details(request):
         print(traceback.format_exc())
         return JsonResponse({"error": str(e)}, status=500)
 
+
+
+
+@csrf_exempt
+def generate_leaderboard(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        
+        if not board_id or not clerk_id:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        data_settings = data_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
+        if not data_settings:
+            return JsonResponse({"error": "Data settings not found"}, status=404)
+        
+        filter_settings = data_settings.get("filter_settings", {})
+        method = data_settings.get("method", "Doc Sum")
+        expression = data_settings.get("expression", {})
+        source = data_settings.get("source")
+        api_data = data_settings.get("api", {})
+        
+        if source == "MongoDB":
+            client = MongoClient(api_data.get("uri"))
+            db = client[api_data.get("database")]
+            collection = db[api_data.get("collection")]
+            data = list(collection.find({}))
+        
+        elif source == "Supabase":
+            supabase: Client = create_client(api_data.get("url"), api_data.get("anonKey"))
+            response = supabase.table(api_data.get("table")).select("*").execute()
+            data = response.data
+        
+        elif source == "Firebase":
+            if not firebase_admin._apps:
+                cred = credentials.Certificate({
+                    "apiKey": api_data.get("apiKey"),
+                    "authDomain": api_data.get("authDomain"),
+                    "projectId": api_data.get("projectId")
+                })
+                initialize_app(cred)
+            
+            db = firestore.client()
+            docs = db.collection(api_data.get("collection")).stream()
+            data = [doc.to_dict() for doc in docs]
+        
+        elif source == "Sheet":
+            gc = gspread.Client()
+            sheet = gc.open_by_url(api_data.get("url"))
+            worksheet = sheet.sheet1
+            records = worksheet.get_all_records()
+
+            # Convert to list of dicts
+            data = []
+            for idx, row in enumerate(records):
+                row_dict = {k: v for k, v in row.items() if v != ''}
+                row_dict["row_number"] = idx + 2  # Add row number for reference
+                data.append(row_dict)
+        
+        else:
+            return JsonResponse({"error": "Unsupported data source"}, status=400)
+        
+        filtered_data = apply_filters(data, filter_settings)
+
+        if method == "Doc Sum":
+            leaderboard_data = process_doc_sum(filtered_data, expression)
+        elif method == "Classic":
+            leaderboard_data = process_classic(filtered_data, expression)
+        else:
+            return JsonResponse({"error": "Unsupported method"}, status=400)
+        
+        return JsonResponse({"success": True, "leaderboard": leaderboard_data}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def apply_filters(data, filter_settings):
+    filtered_data = data
+    if filter_settings.get("filterIn"):
+        filtered_data = [doc for doc in filtered_data if filter_settings["filterIn"] in doc]
+    if filter_settings.get("filterOut"):
+        filtered_data = [doc for doc in filtered_data if filter_settings["filterOut"] not in doc]
+    return filtered_data
+
+def process_doc_sum(data, expression):
+    sum_field = expression.get("sumField")
+    display_field = expression.get("displayField")
+    
+    leaderboard = {}
+    for doc in data:
+        key = doc.get(display_field)
+        value = doc.get(sum_field, 0)
+        if key in leaderboard:
+            leaderboard[key] += value
+        else:
+            leaderboard[key] = value
+    
+    return sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)
+
+def process_classic(data, expression):
+    value_field = expression.get("valueField")
+    display_field = expression.get("displayField")
+    
+    leaderboard = {}
+    for doc in data:
+        key = doc.get(display_field)
+        value = doc.get(value_field, 0)
+        leaderboard[key] = value
+    
+    return sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)
