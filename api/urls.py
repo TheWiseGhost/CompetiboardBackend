@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import main, create_user, board_options, add_board, update_data_source, data_details, update_data_settings, update_display, board_details
+from .views import main, create_user, board_options, add_board, update_data_source, data_details, update_data_settings, update_display, board_details, generate_leaderboard
 
 urlpatterns = [
     path('', main),
@@ -11,4 +11,5 @@ urlpatterns = [
     path('update_data_settings/', update_data_settings),
     path('update_display/', update_display),
     path('data_details/', data_details),
+    path('generate_leaderboard/', generate_leaderboard),
 ]
