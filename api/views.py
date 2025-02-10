@@ -6,6 +6,7 @@ import boto3
 from bson import ObjectId
 import traceback
 import datetime
+from datetime import timedelta
 from collections import defaultdict
 
 from django.views.decorators.csrf import csrf_exempt
@@ -505,3 +506,132 @@ def process_classic(data, expression):
             leaderboard[key] = value
 
     return sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)
+
+
+@csrf_exempt
+def generate_30_days_leaderboard(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        
+        if not board_id or not clerk_id:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        data_settings = data_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
+        if not data_settings:
+            return JsonResponse({"error": "Data settings not found"}, status=404)
+        
+        source = data_settings.get("source")
+        api_data = data_settings.get("api", {})
+        filter_settings = data_settings.get("filter_settings", {})
+        method = data_settings.get("method", "Doc Sum")
+        expression = data_settings.get("expression", {})
+        date_field = data_settings.get("date_settings", {}).get("dateField", "created_at")
+        date_format = data_settings.get("date_settings", {}).get("dateFormat", "MM/DD/YY")
+        
+        # Convert format from user-friendly to Python strftime format
+        format_mapping = {
+            "MM/DD/YY": "%m/%d/%y",
+            "MM/DD/YYYY": "%m/%d/%Y",
+            "DD/MM/YY": "%d/%m/%y",
+            "DD/MM/YYYY": "%d/%m/%Y",
+            "YYYY-MM-DD": "%Y-%m-%d",
+            "YY-MM-DD": "%y-%m-%d"
+        }
+        python_date_format = format_mapping.get(date_format, "%m/%d/%y")
+        
+        # Calculate the date 30 days ago (timezone naive)
+        thirty_days_ago = (datetime.datetime.now(datetime.timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+        print(f"Filtering data from: {thirty_days_ago}")
+        
+        def parse_date(date_str):
+            """Helper function to parse dates with error handling"""
+            try:
+                return datetime.datetime.strptime(date_str, python_date_format)
+            except (ValueError, TypeError) as e:
+                print(f"Error parsing date '{date_str}': {e}")
+                return None
+        
+        data = []
+        if source == "MongoDB":
+            client = MongoClient(api_data.get("uri"))
+            db = client[api_data.get("database")]
+            collection = db[api_data.get("collection")]
+            
+            all_docs = list(collection.find({}))
+            data = [doc for doc in all_docs if 
+                   parse_date(doc.get(date_field)) and 
+                   parse_date(doc.get(date_field)) >= thirty_days_ago]
+            
+        elif source == "Supabase":
+            supabase: Client = create_client(api_data.get("url"), api_data.get("anonKey"))
+            # First get all records, then filter in Python
+            response = supabase.table(api_data.get("table")).select("*").execute()
+            all_docs = response.data
+            data = [doc for doc in all_docs if 
+                   parse_date(doc.get(date_field)) and 
+                   parse_date(doc.get(date_field)) >= thirty_days_ago]
+            
+        elif source == "Firebase":
+            if not firebase_admin._apps:
+                cred = credentials.Certificate({
+                    "apiKey": api_data.get("apiKey"),
+                    "authDomain": api_data.get("authDomain"),
+                    "projectId": api_data.get("projectId")
+                })
+                firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            # Get all documents and filter in Python
+            docs = db.collection(api_data.get("collection")).stream()
+            all_docs = [doc.to_dict() for doc in docs]
+            data = [doc for doc in all_docs if 
+                   parse_date(doc.get(date_field)) and 
+                   parse_date(doc.get(date_field)) >= thirty_days_ago]
+            
+        elif source == "Sheet":
+            gc = gspread.service_account(filename="path_to_google_credentials.json")
+            sheet = gc.open_by_url(api_data.get("url"))
+            worksheet = sheet.sheet1
+            all_records = worksheet.get_all_records()
+            data = [doc for doc in all_records if 
+                   parse_date(doc.get(date_field)) and 
+                   parse_date(doc.get(date_field)) >= thirty_days_ago]
+            
+        else:
+            return JsonResponse({"error": "Unsupported data source"}, status=400)
+        
+        print(f"Raw data length after date filtering: {len(data)}")
+        if data:
+            dates = [parse_date(d[date_field]) for d in data if parse_date(d[date_field])]
+            print(f"Date range: from {min(dates)} to {max(dates)}")
+        print(f"Sample first record: {data[0] if data else None}")
+        
+        # Apply filters
+        filtered_data = apply_filters(data, filter_settings)
+        print(f"Data length after filtering: {len(filtered_data)}")
+        print(f"Sample filtered record: {filtered_data[0] if filtered_data else None}")
+        
+        # Process leaderboard data
+        if method == "Doc Sum":
+            leaderboard_data = process_doc_sum(filtered_data, expression)
+        elif method == "Classic":
+            leaderboard_data = process_classic(filtered_data, expression)
+        else:
+            return JsonResponse({"error": "Unsupported method"}, status=400)
+        
+        print(f"Final leaderboard data length: {len(leaderboard_data)}")
+        print(f"Sample leaderboard entry: {leaderboard_data[0] if leaderboard_data else None}")
+        
+        return JsonResponse({"success": True, "leaderboard": leaderboard_data}, status=200)
+        
+    except json.JSONDecodeError:
+        print("Error: Invalid JSON in request body")
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
