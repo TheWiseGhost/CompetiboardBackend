@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import main, create_user, board_options, add_board, update_data_source, data_details, update_data_settings, update_display, board_details, generate_leaderboard
-from .views import generate_30_days_leaderboard
+from .views import generate_30_days_leaderboard, create_checkout_session, stripe_webhook
 
 urlpatterns = [
     path('', main),
@@ -14,4 +14,6 @@ urlpatterns = [
     path('data_details/', data_details),
     path('generate_leaderboard/', generate_leaderboard),
     path('generate_30_days_leaderboard/', generate_30_days_leaderboard),
+    path("create_checkout_session/", create_checkout_session, name="create_checkout_session"),
+    path("stripe/webhook/", stripe_webhook, name="stripe-webhook"),
 ]

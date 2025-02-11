@@ -635,3 +635,102 @@ def generate_30_days_leaderboard(request):
         print(f"Unexpected error: {str(e)}")
         print(traceback.format_exc())
         return JsonResponse({"error": str(e)}, status=500)
+    
+
+
+# STRIPE CHECKOUT STUFF
+
+# Set Stripe API key
+stripe.api_key = settings.STRIPE_SK
+
+# Stripe webhook secret
+WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET
+
+@csrf_exempt
+def create_checkout_session(request):
+    """
+    Creates a Stripe Checkout Session for recurring monthly payments.
+    """
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            product_id = data.get("product_id")
+            user_id = data.get("user_id")
+            print(user_id)
+
+            # Product price mapping for recurring subscriptions
+            product_to_price_mapping = {
+                "prod_RkfoQuyM98ny66": "price_1QrASzPAkbKeAZBD5OC058Jg",  # Recurring monthly price ID
+            }
+
+            if product_id not in product_to_price_mapping:
+                return JsonResponse({"error": "Invalid Product ID"}, status=400)
+
+            # Create a Stripe Checkout Session for recurring payments
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[
+                    {
+                        "price": product_to_price_mapping[product_id],
+                        "quantity": 1,
+                    }
+                ],
+                mode="subscription",  # Recurring subscription mode
+                success_url="http://localhost:3000/dashboard",
+                cancel_url="http://localhost:3000/dashboard",
+                metadata={
+                    "user_id": user_id,  # Attach user ID as metadata
+                    "product_id": product_id,  # Attach product ID as metadata
+                }
+            )
+
+            return JsonResponse({"url": session.url})
+
+        except Exception as e:
+            print(traceback.format_exc())
+            return JsonResponse({"error": str(e)}, status=400)
+
+@csrf_exempt
+def stripe_webhook(request):
+    """
+    Handles Stripe webhook events.
+    """
+    payload = request.body
+    sig_header = request.META['HTTP_STRIPE_SIGNATURE']
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, WEBHOOK_SECRET
+        )
+    except stripe.error.SignatureVerificationError as e:
+        # Signature doesn't match
+        return JsonResponse({'error': 'Invalid signature'}, status=400)
+
+    # Handle checkout.session.completed
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        handle_checkout_session(session)
+
+    return JsonResponse({"status": "success"}, status=200)
+
+
+def handle_checkout_session(session):
+    """
+    Processes the checkout session completion event.
+    """
+    user_id = session["metadata"].get("user_id")
+    product_id = session["metadata"].get("product_id")
+
+    if user_id:
+        user = users_collection.find_one({'clerk_id': user_id})
+    else:
+        print("no user id")    
+
+    if user and product_id=="prod_RkfoQuyM98ny66":
+        try:
+            users_collection.update_one({'clerk_id': user_id}, {
+                        '$set': {'plan': 'pro'}
+                    })
+            print(f"Added Pro Plan to user {user_id}.")
+        except Exception as e:
+            print(f"Failed to update MongoDB: {e}")
