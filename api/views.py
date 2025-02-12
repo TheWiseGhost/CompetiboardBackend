@@ -268,13 +268,10 @@ def update_data_settings(request):
             return JsonResponse({"error": "Data document not found"}, status=404)
         
         # Update the document
-        update_result = data_collection.update_one(
+        data_collection.update_one(
             {"board_id": board_id, "creator_id": clerk_id},
             {"$set": {"method": method, "filter_settings": filter_settings, "date_settings": date_settings, "expression": expression}}
         )
-        
-        if update_result.modified_count == 0:
-            return JsonResponse({"error": "No changes made"}, status=400)
         
         return JsonResponse({"success": True, "message": "Data updated successfully"}, status=200)
     
@@ -306,13 +303,10 @@ def update_display(request):
             return JsonResponse({"error": "Board document not found"}, status=404)
         
         # Update the document
-        update_result = boards_collection.update_one(
+        boards_collection.update_one(
             {"_id": ObjectId(board_id), "creator_id": clerk_id},
             {"$set": {"display": settings}}
         )
-        
-        if update_result.modified_count == 0:
-            return JsonResponse({"error": "No changes made"}, status=400)
         
         return JsonResponse({"success": True, "message": "Data updated successfully"}, status=200)
     
