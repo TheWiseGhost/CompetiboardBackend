@@ -132,11 +132,24 @@ def add_board(req):
     try:
         print('recieved')
         clerk_id = req.POST.get('clerk_id')
-        title = req.POST.get('title')
+        title = req.POST.get('title', '').lower()
         my_file = req.FILES['file']
 
-        date = datetime.datetime.today()
+        if not clerk_id:
+            print('No ClerkID')
+            return JsonResponse({'error': 'clerk_id is required'})
+        
+        user = users_collection.find_one({'clerk_id': clerk_id})
+        if not user:
+            print('No User')
+            return JsonResponse({'error': 'User not found'})
+        
+        # Check for duplicate title
+        existing_board = boards_collection.find_one({'title': title, 'creator_id': clerk_id})
+        if existing_board:
+            return JsonResponse({'warning': 'A board with this title already exists'}, status=200)
 
+        date = datetime.datetime.today()
         key = f'thumbnails/{clerk_id}_{my_file.name}'
 
         s3.upload_fileobj(
@@ -147,17 +160,6 @@ def add_board(req):
         )
 
         s3_url = f"https://{bucket_name}.s3.amazonaws.com/{key}"
-        
-
-        if not clerk_id:
-            print('No ClerkID')
-            return JsonResponse({'error': 'clerk_id is required'})
-        
-        user = users_collection.find_one({'clerk_id': clerk_id})
-        if not user:
-            print('No User')
-            return JsonResponse({'error': 'User not found'})
-
 
         data = {
             "creator_id": clerk_id, 
@@ -170,7 +172,6 @@ def add_board(req):
         }
 
         created_data = data_collection.insert_one(data)
-
         data_id = created_data.inserted_id
 
         board = {
@@ -185,8 +186,6 @@ def add_board(req):
         }
 
         created_board = boards_collection.insert_one(board)
-
-        # Get the ObjectId of the inserted board document
         board_id = created_board.inserted_id
 
         data_collection.update_one(
