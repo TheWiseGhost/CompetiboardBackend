@@ -18,7 +18,7 @@ import stripe
 import gspread
 from supabase import create_client, Client
 import firebase_admin
-from firebase_admin import credentials, firestore, initialize_app
+from firebase_admin import credentials, firestore
 
 
 client = MongoClient(f'{settings.MONGO_URI}')
