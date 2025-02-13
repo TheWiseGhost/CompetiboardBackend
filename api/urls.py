@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import main, create_user, board_options, add_board, update_data_source, data_details, update_data_settings, update_display, board_details, generate_leaderboard
 from .views import generate_30_days_leaderboard, create_checkout_session, stripe_webhook, public_board_details, public_generate_leaderboard, public_generate_30_days_leaderboard
+from .views import user_details
 
 urlpatterns = [
     path('', main),
@@ -19,4 +20,5 @@ urlpatterns = [
     path('public_board_details/', public_board_details),
     path('public_generate_leaderboard/', public_generate_leaderboard),
     path('public_generate_30_days_leaderboard/', public_generate_30_days_leaderboard),
+    path('user_details/', user_details),
 ]

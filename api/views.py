@@ -100,6 +100,31 @@ def create_user(request):
 
 
 @csrf_exempt
+def user_details(request):
+    try:
+        data = json.loads(request.body)
+        clerk_id = data.get("clerk_id")
+        
+        if not clerk_id:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        user = users_collection.find_one({"clerk_id": clerk_id})
+        if not user:
+            return JsonResponse({"error": "User document not found"}, status=404)
+        
+        user['_id'] = str(user['_id'])
+        
+        return JsonResponse({"data": user}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
 def board_options(req):
     print('recieved')
     try:
@@ -168,7 +193,8 @@ def add_board(req):
             "api": {},
             "filter_settings": {},
             "date_settings": {},
-            "method": {}
+            "method": {},
+            "expression": {},
         }
 
         created_data = data_collection.insert_one(data)
@@ -183,6 +209,27 @@ def add_board(req):
             "published": False,
             "thumbnail": s3_url, 
             "data": str(data_id),
+            "display": {'borders': "",
+                        'boardBackground': "",
+                        'pageBackground': "",
+                        'titleColor': "",
+                        'subtitleColor': "",
+                        'dateRange': "",
+                        'tableHeaders': "",
+                        'ranks': "",
+                        'rankingField': "",
+                        'nameField': "",
+                        'title': "",
+                        'subtitle': "",
+                        'rankingTitle': "",
+                        'nameTitle': "",
+                        'titleFont': "",
+                        'subtitleFont': "",
+                        'boardRankTitleFont': "",
+                        'boardRankFont': "",
+                        'boardNameTitleFont': "",
+                        'boardNameFont': "",
+                    }
         }
 
         created_board = boards_collection.insert_one(board)
@@ -231,9 +278,6 @@ def update_data_source(request):
             {"board_id": board_id, "creator_id": clerk_id},
             {"$set": {"source": source, "api": api_data}}
         )
-        
-        if update_result.modified_count == 0:
-            return JsonResponse({"error": "No changes made"}, status=400)
         
         return JsonResponse({"success": True, "message": "Data updated successfully"}, status=200)
     
