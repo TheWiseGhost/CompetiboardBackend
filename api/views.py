@@ -951,7 +951,7 @@ def create_checkout_session(request):
 
             # Product price mapping for recurring subscriptions
             product_to_price_mapping = {
-                "prod_RkfoQuyM98ny66": "price_1QrASzPAkbKeAZBD5OC058Jg",  # Recurring monthly price ID
+                "prod_RmO52yWy4eNtNq": "price_1QspJAAszcsVQ3TAx8czqoUs",  # Recurring monthly price ID
             }
 
             if product_id not in product_to_price_mapping:
@@ -967,8 +967,8 @@ def create_checkout_session(request):
                     }
                 ],
                 mode="subscription",  # Recurring subscription mode
-                success_url="http://localhost:3000/dashboard",
-                cancel_url="http://localhost:3000/dashboard",
+                success_url="https://competiboard.vercel.app/dashboard",
+                cancel_url="https://competiboard.vercel.app/dashboard",
                 metadata={
                     "user_id": user_id,  # Attach user ID as metadata
                     "product_id": product_id,  # Attach product ID as metadata
@@ -1017,7 +1017,7 @@ def handle_checkout_session(session):
     else:
         print("no user id")    
 
-    if user and product_id=="prod_RkfoQuyM98ny66":
+    if user and product_id=="prod_RmO52yWy4eNtNq":
         try:
             users_collection.update_one({'clerk_id': user_id}, {
                         '$set': {'plan': 'pro'}
