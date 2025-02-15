@@ -427,9 +427,20 @@ def public_board_details(request):
         if not existing_board:
             return JsonResponse({"error": "Board document not found"}, status=404)
         
-        existing_board['_id'] = str(existing_board['_id'])
+        clerk_id = existing_board["creator_id"]
         
-        return JsonResponse({"data": existing_board}, status=200)
+        # Find the existing data document
+        user = users_collection.find_one({"clerk_id": clerk_id})
+        if not user:
+            return JsonResponse({"error": "User document not found"}, status=404)
+        
+        user['_id'] = str(user['_id'])
+        
+        existing_board['_id'] = str(existing_board['_id'])
+        existing_board['creator_id'] = ""
+        
+        
+        return JsonResponse({"data": existing_board, "user_details": user}, status=200)
     
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
