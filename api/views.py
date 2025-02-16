@@ -169,6 +169,9 @@ def add_board(req):
             print('No User')
             return JsonResponse({'error': 'User not found'})
         
+        if user['num_boards'] >= 3 and user['plan'] != 'pro':
+            return JsonResponse({'pro': 'Need pro for more than 3 boards'}, status=200);
+        
         # Check for duplicate title
         existing_board = boards_collection.find_one({'title': title, 'creator_id': clerk_id})
         if existing_board:
@@ -520,7 +523,7 @@ def generate_leaderboard(request):
         else:
             return JsonResponse({"error": "Unsupported method"}, status=400)
 
-        return JsonResponse({"success": True, "leaderboard": leaderboard_data}, status=200)
+        return JsonResponse({"success": True, "leaderboard": leaderboard_data[:50]}, status=200)
 
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
@@ -603,7 +606,7 @@ def public_generate_leaderboard(request):
         else:
             return JsonResponse({"error": "Unsupported method"}, status=400)
 
-        return JsonResponse({"success": True, "leaderboard": leaderboard_data}, status=200)
+        return JsonResponse({"success": True, "leaderboard": leaderboard_data[:50]}, status=200)
 
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
@@ -784,7 +787,7 @@ def generate_30_days_leaderboard(request):
         print(f"Final leaderboard data length: {len(leaderboard_data)}")
         print(f"Sample leaderboard entry: {leaderboard_data[0] if leaderboard_data else None}")
         
-        return JsonResponse({"success": True, "leaderboard": leaderboard_data}, status=200)
+        return JsonResponse({"success": True, "leaderboard": leaderboard_data[:50]}, status=200)
         
     except json.JSONDecodeError:
         print("Error: Invalid JSON in request body")
@@ -917,7 +920,7 @@ def public_generate_30_days_leaderboard(request):
         print(f"Final leaderboard data length: {len(leaderboard_data)}")
         print(f"Sample leaderboard entry: {leaderboard_data[0] if leaderboard_data else None}")
         
-        return JsonResponse({"success": True, "leaderboard": leaderboard_data}, status=200)
+        return JsonResponse({"success": True, "leaderboard": leaderboard_data[:50]}, status=200)
         
     except json.JSONDecodeError:
         print("Error: Invalid JSON in request body")
