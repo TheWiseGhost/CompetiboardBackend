@@ -1,4 +1,4 @@
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from pymongo import MongoClient
 from django.conf import settings
@@ -14,6 +14,7 @@ from django.http import JsonResponse
 from pymongo import MongoClient
 import json
 import re
+import requests
 import stripe
 import gspread
 from supabase import create_client, Client
@@ -1063,18 +1064,168 @@ def update_reward(request):
             return JsonResponse({"error": "Missing required fields"}, status=400)
         
         # Find the existing data document
-        existing_reward = rewards_collection.find_one({"_id": ObjectId(board_id), "creator_id": clerk_id})
+        existing_reward = rewards_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
         if not existing_reward:
-            return JsonResponse({"error": "Reward document not found"}, status=404)
+            return JsonResponse({"error": "Reward document not found"}, status=400)
         
         # Update the document
         rewards_collection.update_one(
-            {"_id": ObjectId(board_id), "creator_id": clerk_id},
+            {"board_id": board_id, "creator_id": clerk_id},
             {"$set": {"email_field": email_field, "email_body": email_body}}
         )
         
         return JsonResponse({"success": True, "message": "Reward updated successfully"}, status=200)
     
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+@csrf_exempt
+def reward_details(request):
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        
+        if not board_id or not clerk_id:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_reward = rewards_collection.find_one({"board_id": board_id, "creator_id": clerk_id})
+        if not existing_reward:
+            return JsonResponse({"error": "Data document not found"}, status=404)
+        
+        existing_reward['_id'] = str(existing_reward['_id'])
+        
+        return JsonResponse({"data": existing_reward}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+    
+
+@csrf_exempt
+def send_rewards(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        time_range = data.get("time")
+        min_rank = int(data.get("min_rank"))
+        max_rank = int(data.get("max_rank"))
+
+        if not all([board_id, clerk_id, time_range, min_rank, max_rank]):
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+
+        # Get reward settings from MongoDB
+        reward_settings = rewards_collection.find_one({
+            "_id": ObjectId(board_id),
+            "creator_id": clerk_id
+        })
+        
+        if not reward_settings:
+            return JsonResponse({"error": "Reward settings not found"}, status=404)
+
+        # Create mock request for leaderboard generation
+        lb_request = HttpRequest()
+        lb_request.method = "POST"
+        lb_request.content_type = "application/json"
+        lb_request._body = json.dumps({
+            "board_id": board_id,
+            "clerk_id": clerk_id
+        })
+
+        # Generate appropriate leaderboard
+        if time_range == "30":
+            lb_response = generate_30_days_leaderboard(lb_request)
+        else:
+            lb_response = generate_leaderboard(lb_request)
+
+        if lb_response.status_code != 200:
+            return lb_response
+
+        leaderboard = json.loads(lb_response.content)["leaderboard"]
+        
+        # Process ranks with proper tie handling
+        ranked_users = []
+        current_rank = 1
+        previous_score = None
+        actual_position = 0
+        
+        sorted_users = sorted(leaderboard, key=lambda x: x["score"], reverse=True)
+        for user in sorted_users:
+            actual_position += 1
+            if user["score"] != previous_score:
+                current_rank = actual_position
+                previous_score = user["score"]
+            
+            if current_rank > max_rank:
+                break
+                
+            if current_rank >= min_rank:
+                ranked_users.append({
+                    "rank": current_rank,
+                    "email": user.get(reward_settings["email_field"]),
+                    "data": user
+                })
+
+        # Mailgun configuration
+        mailgun_domain = settings.MAILGUN_DOMAIN or ""
+        mailgun_api_key = settings.MAILGUN_API_KEY or ""
+        sent_emails = []
+        failed_emails = []
+
+        email_body = reward_settings["email_body"]
+        email_field = reward_settings["email_field"]
+
+        for user in ranked_users:
+            if not user[email_field]:
+                continue
+
+            try:
+                # Send via Mailgun
+                response = requests.post(
+                    f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
+                    auth=("api", mailgun_api_key),
+                    data={
+                        "from": f"Rewards System <rewards@{mailgun_domain}>",
+                        "to": [user["email"]],
+                        "subject": "Your Reward Details",
+                        "text": email_body
+                    }
+                )
+
+                if response.status_code == 200:
+                    sent_emails.append(user["email"])
+                else:
+                    failed_emails.append({
+                        "email": user["email"],
+                        "error": response.json().get("message", "Unknown error")
+                    })
+
+            except Exception as e:
+                failed_emails.append({
+                    "email": user["email"],
+                    "error": str(e)
+                })
+
+        return JsonResponse({
+            "success": True,
+            "sent_count": len(sent_emails),
+            "failed_count": len(failed_emails),
+            "sent_emails": sent_emails,
+            "failed_emails": failed_emails,
+            "message": f"Successfully sent {len(sent_emails)} emails"
+        })
+
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
