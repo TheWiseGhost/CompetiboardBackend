@@ -26,6 +26,7 @@ db = client['Competiboard']
 boards_collection = db['Boards']
 users_collection = db['Users']
 data_collection = db['Data']
+rewards_collection = db['Rewards']
 aws_access_key_id = settings.AWS_ACCESS_KEY_ID
 aws_secret_access_key = settings.AWS_SECRET_ACCESS_KEY
 
@@ -200,8 +201,18 @@ def add_board(req):
             "expression": {},
         }
 
+        reward = {
+            "creator_id": clerk_id, 
+            "creator_name": user['name'],
+            "email_field": "",
+            "email_body": "",
+        }
+
         created_data = data_collection.insert_one(data)
         data_id = created_data.inserted_id
+
+        created_reward = rewards_collection.insert_one(reward)
+        reward_id = created_reward.inserted_id
 
         board = {
             "creator_id": clerk_id,
@@ -212,6 +223,7 @@ def add_board(req):
             "published": False,
             "thumbnail": s3_url, 
             "data": str(data_id),
+            "reward": str(reward_id),
             "display": {'borders': "",
                         'boardBackground': "",
                         'pageBackground': "",
@@ -240,6 +252,11 @@ def add_board(req):
 
         data_collection.update_one(
             {'_id': data_id},
+            {'$set': {'board_id': str(board_id)}}
+        )
+
+        rewards_collection.update_one(
+            {'_id': reward_id},
             {'$set': {'board_id': str(board_id)}}
         )
 
@@ -1028,3 +1045,39 @@ def handle_checkout_session(session):
             print(f"Added Pro Plan to user {user_id}.")
         except Exception as e:
             print(f"Failed to update MongoDB: {e}")
+
+
+@csrf_exempt
+def update_reward(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        board_id = data.get("board_id")
+        clerk_id = data.get("clerk_id")
+        email_field = data.get("email_field")
+        email_body = data.get("email_body")
+        
+        if not board_id or not clerk_id or not email_field or not email_body:
+            return JsonResponse({"error": "Missing required fields"}, status=400)
+        
+        # Find the existing data document
+        existing_reward = rewards_collection.find_one({"_id": ObjectId(board_id), "creator_id": clerk_id})
+        if not existing_reward:
+            return JsonResponse({"error": "Reward document not found"}, status=404)
+        
+        # Update the document
+        rewards_collection.update_one(
+            {"_id": ObjectId(board_id), "creator_id": clerk_id},
+            {"$set": {"email_field": email_field, "email_body": email_body}}
+        )
+        
+        return JsonResponse({"success": True, "message": "Reward updated successfully"}, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"error": str(e)}, status=500)
+    
