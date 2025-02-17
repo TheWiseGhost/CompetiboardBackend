@@ -1127,7 +1127,7 @@ def send_rewards(request):
 
         # Get reward settings
         reward_settings = rewards_collection.find_one({
-            "_id": ObjectId(board_id),
+            "board_id": board_id,
             "creator_id": clerk_id
         })
         if not reward_settings:
@@ -1135,7 +1135,7 @@ def send_rewards(request):
 
         # Get data source configuration
         data_settings = data_collection.find_one({
-            "board_id": ObjectId(board_id),
+            "board_id": board_id,
             "creator_id": clerk_id
         })
         if not data_settings:
@@ -1166,18 +1166,18 @@ def send_rewards(request):
         previous_score = None
         actual_position = 0
 
-        sorted_users = sorted(leaderboard, key=lambda x: x["score"], reverse=True)
+        sorted_users = sorted(leaderboard, key=lambda x: x[1], reverse=True)
         for user in sorted_users:
             actual_position += 1
-            if user["score"] != previous_score:
+            if user[1] != previous_score:
                 current_rank = actual_position
-                previous_score = user["score"]
+                previous_score = user[1]
 
             if current_rank > max_rank:
                 break
 
             if current_rank >= min_rank:
-                username = user.get(group_by_field)
+                username = user[0]
                 if not username:
                     continue
 
@@ -1206,19 +1206,15 @@ def send_rewards(request):
 
         for user in ranked_users:
             try:
-                email_body = reward_settings["email_body"].format(
-                    rank=user["rank"],
-                    username=user["data"].get(group_by_field, ""),
-                    score=user["data"].get("score", "")
-                )
+                email_body = reward_settings["email_body"]
 
                 response = requests.post(
                     f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
                     auth=("api", mailgun_api_key),
                     data={
-                        "from": f"Rewards System <rewards@{mailgun_domain}>",
+                        "from": f"Competiboard <mailgun@{mailgun_domain}>",
                         "to": [user["email"]],
-                        "subject": "Your Reward Details",
+                        "subject": "Congrats for placing on the leaderboard!",
                         "text": email_body
                     }
                 )
