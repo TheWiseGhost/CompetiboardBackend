@@ -988,8 +988,8 @@ def create_checkout_session(request):
                     }
                 ],
                 mode="subscription",  # Recurring subscription mode
-                success_url="https://competiboard.vercel.app/dashboard",
-                cancel_url="https://competiboard.vercel.app/dashboard",
+                success_url="https://competiboard.com/dashboard",
+                cancel_url="https://competiboard.com/dashboard",
                 metadata={
                     "user_id": user_id,  # Attach user ID as metadata
                     "product_id": product_id,  # Attach product ID as metadata
