@@ -110,12 +110,29 @@ def user_details(request):
         if not clerk_id:
             return JsonResponse({"error": "Missing required fields"}, status=400)
         
-        # Find the existing data document
+        # Find the existing user document
         user = users_collection.find_one({"clerk_id": clerk_id})
         if not user:
             return JsonResponse({"error": "User document not found"}, status=404)
         
+        # Convert _id to string for JSON serialization
         user['_id'] = str(user['_id'])
+
+        # Check if last_paid exists
+        last_paid = user.get("last_paid")
+        
+        # Define the time threshold (1.5 months ago)
+        time_threshold = datetime.datetime.today() - timedelta(days=45)
+
+        if last_paid and last_paid >= time_threshold:
+            user['plan'] = "pro"
+        else:
+            # Update plan to 'free' in MongoDB
+            users_collection.update_one(
+                {"clerk_id": clerk_id},
+                {"$set": {"plan": "free"}}
+            )
+            user['plan'] = "free"  # Reflect this in the response
         
         return JsonResponse({"data": user}, status=200)
     
@@ -1041,7 +1058,7 @@ def handle_checkout_session(session):
     if user and product_id=="prod_RmO52yWy4eNtNq":
         try:
             users_collection.update_one({'clerk_id': user_id}, {
-                        '$set': {'plan': 'pro'}
+                        '$set': {'plan': 'pro', 'last_paid': datetime.datetime.today()}
                     })
             print(f"Added Pro Plan to user {user_id}.")
         except Exception as e:
