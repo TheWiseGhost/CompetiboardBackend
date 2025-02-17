@@ -1125,16 +1125,23 @@ def send_rewards(request):
         if not all([board_id, clerk_id, time_range, min_rank, max_rank]):
             return JsonResponse({"error": "Missing required fields"}, status=400)
 
-        # Get reward settings from MongoDB
+        # Get reward settings
         reward_settings = rewards_collection.find_one({
             "_id": ObjectId(board_id),
             "creator_id": clerk_id
         })
-        
         if not reward_settings:
             return JsonResponse({"error": "Reward settings not found"}, status=404)
 
-        # Create mock request for leaderboard generation
+        # Get data source configuration
+        data_settings = data_collection.find_one({
+            "board_id": ObjectId(board_id),
+            "creator_id": clerk_id
+        })
+        if not data_settings:
+            return JsonResponse({"error": "Data settings not found"}, status=404)
+
+        # Generate leaderboard
         lb_request = HttpRequest()
         lb_request.method = "POST"
         lb_request.content_type = "application/json"
@@ -1143,55 +1150,68 @@ def send_rewards(request):
             "clerk_id": clerk_id
         })
 
-        # Generate appropriate leaderboard
-        if time_range == "30":
-            lb_response = generate_30_days_leaderboard(lb_request)
-        else:
-            lb_response = generate_leaderboard(lb_request)
-
+        lb_response = generate_30_days_leaderboard(lb_request) if time_range == "30" else generate_leaderboard(lb_request)
         if lb_response.status_code != 200:
             return lb_response
 
         leaderboard = json.loads(lb_response.content)["leaderboard"]
-        
-        # Process ranks with proper tie handling
+        group_by_field = data_settings.get("expression", {}).get("groupBy", "username")
+        source_type = data_settings.get("source")
+        api_config = data_settings.get("api", {})
+
+        # Connect to data source
+        data_source = connect_to_source(source_type, api_config)
         ranked_users = []
         current_rank = 1
         previous_score = None
         actual_position = 0
-        
+
         sorted_users = sorted(leaderboard, key=lambda x: x["score"], reverse=True)
         for user in sorted_users:
             actual_position += 1
             if user["score"] != previous_score:
                 current_rank = actual_position
                 previous_score = user["score"]
-            
+
             if current_rank > max_rank:
                 break
-                
-            if current_rank >= min_rank:
-                ranked_users.append({
-                    "rank": current_rank,
-                    "email": user.get(reward_settings["email_field"]),
-                    "data": user
-                })
 
-        # Mailgun configuration
-        mailgun_domain = settings.MAILGUN_DOMAIN or ""
-        mailgun_api_key = settings.MAILGUN_API_KEY or ""
+            if current_rank >= min_rank:
+                username = user.get(group_by_field)
+                if not username:
+                    continue
+
+                # Get user email from original data source
+                email = get_user_email(
+                    source_type,
+                    data_source,
+                    group_by_field,
+                    str(username),
+                    reward_settings["email_field"],
+                    api_config
+                )
+
+                if email:
+                    ranked_users.append({
+                        "rank": current_rank,
+                        "email": email,
+                        "data": user
+                    })
+
+        # Mailgun email sending
+        mailgun_domain = settings.MAILGUN_DOMAIN
+        mailgun_api_key = settings.MAILGUN_API_KEY
         sent_emails = []
         failed_emails = []
 
-        email_body = reward_settings["email_body"]
-        email_field = reward_settings["email_field"]
-
         for user in ranked_users:
-            if not user[email_field]:
-                continue
-
             try:
-                # Send via Mailgun
+                email_body = reward_settings["email_body"].format(
+                    rank=user["rank"],
+                    username=user["data"].get(group_by_field, ""),
+                    score=user["data"].get("score", "")
+                )
+
                 response = requests.post(
                     f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
                     auth=("api", mailgun_api_key),
@@ -1222,8 +1242,7 @@ def send_rewards(request):
             "sent_count": len(sent_emails),
             "failed_count": len(failed_emails),
             "sent_emails": sent_emails,
-            "failed_emails": failed_emails,
-            "message": f"Successfully sent {len(sent_emails)} emails"
+            "failed_emails": failed_emails
         })
 
     except json.JSONDecodeError:
@@ -1231,4 +1250,54 @@ def send_rewards(request):
     except Exception as e:
         print(traceback.format_exc())
         return JsonResponse({"error": str(e)}, status=500)
+
+
+def connect_to_source(source_type, api_config):
+    """Connect to the original data source"""
+    if source_type == "MongoDB":
+        client = MongoClient(api_config.get("uri"))
+        return client[api_config.get("database")][api_config.get("collection")]
+    elif source_type == "Supabase":
+        return create_client(api_config.get("url"), api_config.get("anonKey"))
+    elif source_type == "Firebase":
+        if not firebase_admin._apps:
+            cred = credentials.Certificate({
+                "apiKey": api_config.get("apiKey"),
+                "authDomain": api_config.get("authDomain"),
+                "projectId": api_config.get("projectId")
+            })
+            firebase_admin.initialize_app(cred)
+        return firestore.client()
+    elif source_type == "Sheet":
+        gc = gspread.service_account(filename="path_to_credentials.json")
+        return gc.open_by_url(api_config.get("url")).sheet1
+    return None
+
+def get_user_email(source_type, data_source, group_field, username, email_field, api_config):
+    """Query the data source to find user's email"""
+    try:
+        if source_type == "MongoDB":
+            user = data_source.find_one({group_field: username})
+            return user.get(email_field) if user else None
+        elif source_type == "Supabase":
+            response = data_source.table(api_config.get("table")) \
+                .select(email_field) \
+                .eq(group_field, username) \
+                .execute()
+            return response.data[0].get(email_field) if response.data else None
+        elif source_type == "Firebase":
+            docs = data_source.collection(api_config.get("collection")) \
+                .where(group_field, "==", username) \
+                .limit(1) \
+                .stream()
+            return next(docs).to_dict().get(email_field) if docs else None
+        elif source_type == "Sheet":
+            records = data_source.get_all_records()
+            for record in records:
+                if str(record.get(group_field, "")) == username:
+                    return record.get(email_field)
+        return None
+    except Exception as e:
+        print(f"Error fetching email for {username}: {str(e)}")
+        return None
     
