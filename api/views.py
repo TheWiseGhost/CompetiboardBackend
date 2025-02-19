@@ -20,6 +20,7 @@ import gspread
 from supabase import create_client, Client
 import firebase_admin
 from firebase_admin import credentials, firestore
+import pandas as pd
 
 
 client = MongoClient(f'{settings.MONGO_URI}')
@@ -538,11 +539,42 @@ def generate_leaderboard(request):
             data = [doc.to_dict() for doc in docs]
 
         elif source == "Sheet":
-            gc = gspread.service_account(filename="path_to_google_credentials.json")
-            sheet = gc.open_by_url(api_data.get("url"))
-            worksheet = sheet.sheet1
-            records = worksheet.get_all_records()
-            data = [{k: v for k, v in row.items() if v != ''} for row in records]
+            # Convert Google Sheets URL to CSV export URL
+            sheet_id = api_data.get("url").split('/')[5]  # Extract sheet ID from URL
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+            
+            # Read data using pandas
+            df = pd.read_csv(csv_url)
+            
+            # Ensure we have column headers
+            if df.empty or df.columns.empty:
+                return JsonResponse({"error": "Sheet is empty or missing headers"}, status=400)
+            
+            # Clean column headers - remove whitespace and special characters
+            df.columns = df.columns.str.strip()
+            
+            # Convert DataFrame to list of dicts
+            data = df.to_dict('records')
+            
+            # Clean up the data and ensure consistent format
+            cleaned_data = []
+            for row in data:
+                cleaned_row = {}
+                for key, value in row.items():
+                    # Only include non-empty values
+                    if pd.notna(value) and str(value).strip() != '':
+                        # Convert numeric types to match MongoDB format
+                        if isinstance(value, (int, float)):
+                            cleaned_row[key] = float(value) if isinstance(value, float) else int(value)
+                        else:
+                            cleaned_row[key] = str(value).strip()
+                if cleaned_row:  # Only include rows with data
+                    cleaned_data.append(cleaned_row)
+            
+            data = cleaned_data
+            
+            if not data:
+                return JsonResponse({"error": "No valid data found in sheet"}, status=400)
 
         else:
             return JsonResponse({"error": "Unsupported data source"}, status=400)
@@ -621,11 +653,42 @@ def public_generate_leaderboard(request):
             data = [doc.to_dict() for doc in docs]
 
         elif source == "Sheet":
-            gc = gspread.service_account(filename="path_to_google_credentials.json")
-            sheet = gc.open_by_url(api_data.get("url"))
-            worksheet = sheet.sheet1
-            records = worksheet.get_all_records()
-            data = [{k: v for k, v in row.items() if v != ''} for row in records]
+            # Convert Google Sheets URL to CSV export URL
+            sheet_id = api_data.get("url").split('/')[5]  # Extract sheet ID from URL
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+            
+            # Read data using pandas
+            df = pd.read_csv(csv_url)
+            
+            # Ensure we have column headers
+            if df.empty or df.columns.empty:
+                return JsonResponse({"error": "Sheet is empty or missing headers"}, status=400)
+            
+            # Clean column headers - remove whitespace and special characters
+            df.columns = df.columns.str.strip()
+            
+            # Convert DataFrame to list of dicts
+            data = df.to_dict('records')
+            
+            # Clean up the data and ensure consistent format
+            cleaned_data = []
+            for row in data:
+                cleaned_row = {}
+                for key, value in row.items():
+                    # Only include non-empty values
+                    if pd.notna(value) and str(value).strip() != '':
+                        # Convert numeric types to match MongoDB format
+                        if isinstance(value, (int, float)):
+                            cleaned_row[key] = float(value) if isinstance(value, float) else int(value)
+                        else:
+                            cleaned_row[key] = str(value).strip()
+                if cleaned_row:  # Only include rows with data
+                    cleaned_data.append(cleaned_row)
+            
+            data = cleaned_data
+            
+            if not data:
+                return JsonResponse({"error": "No valid data found in sheet"}, status=400)
 
         else:
             return JsonResponse({"error": "Unsupported data source"}, status=400)
@@ -658,6 +721,8 @@ def apply_filters(data, filter_settings):
     # Apply filterIn (only if it's not "None")
     if filter_in and filter_in != "None":
         data = [doc for doc in data if filter_in in doc.values()]
+    
+    print(f"Data after filterIn: {data}")  # Debugging step
 
     # Apply filterOut if it contains a valid condition
     if filter_out:
@@ -665,12 +730,16 @@ def apply_filters(data, filter_settings):
             condition_key, condition_value = filter_out.replace("'", "").split("==")
             condition_key = condition_key.strip()
             condition_value = condition_value.strip()
+            
+            # Apply filterOut condition safely
+            data = [doc for doc in data if str(doc.get(condition_key)) != condition_value]
 
-            data = [doc for doc in data if doc.get(condition_key) != condition_value]
+            print(f"Data after filterOut: {data}")
         except Exception as e:
             print(f"Error parsing filterOut condition: {filter_out}, Error: {e}")
 
     return data
+
 
 
 def process_doc_sum(data, expression):
@@ -789,14 +858,46 @@ def generate_30_days_leaderboard(request):
                    parse_date(doc.get(date_field)) >= thirty_days_ago]
             
         elif source == "Sheet":
-            gc = gspread.service_account(filename="path_to_google_credentials.json")
-            sheet = gc.open_by_url(api_data.get("url"))
-            worksheet = sheet.sheet1
-            all_records = worksheet.get_all_records()
-            data = [doc for doc in all_records if 
-                   parse_date(doc.get(date_field)) and 
-                   parse_date(doc.get(date_field)) >= thirty_days_ago]
+            # Convert Google Sheets URL to CSV export URL
+            sheet_id = api_data.get("url").split('/')[5]  # Extract sheet ID from URL
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
             
+            # Read data using pandas
+            df = pd.read_csv(csv_url)
+            
+            # Ensure we have column headers
+            if df.empty or df.columns.empty:
+                return JsonResponse({"error": "Sheet is empty or missing headers"}, status=400)
+            
+            # Clean column headers - remove whitespace and special characters
+            df.columns = df.columns.str.strip()
+            
+            # Convert DataFrame to list of dicts
+            data = df.to_dict('records')
+            
+            # Clean up the data and ensure consistent format
+            cleaned_data = []
+            for row in data:
+                cleaned_row = {}
+                for key, value in row.items():
+                    # Only include non-empty values
+                    if pd.notna(value) and str(value).strip() != '':
+                        # Convert numeric types to match MongoDB format
+                        if isinstance(value, (int, float)):
+                            cleaned_row[key] = float(value) if isinstance(value, float) else int(value)
+                        else:
+                            cleaned_row[key] = str(value).strip()
+                if cleaned_row:  # Only include rows with data
+                    cleaned_data.append(cleaned_row)
+            
+            if not cleaned_data:
+                return JsonResponse({"error": "No valid data found in sheet"}, status=400)
+            
+            data = [doc for doc in cleaned_data if 
+                     date_field in doc and 
+                     parse_date(doc[date_field]) and 
+                     parse_date(doc[date_field]) >= thirty_days_ago]
+
         else:
             return JsonResponse({"error": "Unsupported data source"}, status=400)
         
@@ -922,13 +1023,45 @@ def public_generate_30_days_leaderboard(request):
                    parse_date(doc.get(date_field)) >= thirty_days_ago]
             
         elif source == "Sheet":
-            gc = gspread.service_account(filename="path_to_google_credentials.json")
-            sheet = gc.open_by_url(api_data.get("url"))
-            worksheet = sheet.sheet1
-            all_records = worksheet.get_all_records()
-            data = [doc for doc in all_records if 
-                   parse_date(doc.get(date_field)) and 
-                   parse_date(doc.get(date_field)) >= thirty_days_ago]
+            # Convert Google Sheets URL to CSV export URL
+            sheet_id = api_data.get("url").split('/')[5]  # Extract sheet ID from URL
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+            
+            # Read data using pandas
+            df = pd.read_csv(csv_url)
+            
+            # Ensure we have column headers
+            if df.empty or df.columns.empty:
+                return JsonResponse({"error": "Sheet is empty or missing headers"}, status=400)
+            
+            # Clean column headers - remove whitespace and special characters
+            df.columns = df.columns.str.strip()
+            
+            # Convert DataFrame to list of dicts
+            data = df.to_dict('records')
+            
+            # Clean up the data and ensure consistent format
+            cleaned_data = []
+            for row in data:
+                cleaned_row = {}
+                for key, value in row.items():
+                    # Only include non-empty values
+                    if pd.notna(value) and str(value).strip() != '':
+                        # Convert numeric types to match MongoDB format
+                        if isinstance(value, (int, float)):
+                            cleaned_row[key] = float(value) if isinstance(value, float) else int(value)
+                        else:
+                            cleaned_row[key] = str(value).strip()
+                if cleaned_row:  # Only include rows with data
+                    cleaned_data.append(cleaned_row)
+            
+            if not cleaned_data:
+                return JsonResponse({"error": "No valid data found in sheet"}, status=400)
+            
+            data = [doc for doc in cleaned_data if 
+                     date_field in doc and 
+                     parse_date(doc[date_field]) and 
+                     parse_date(doc[date_field]) >= thirty_days_ago]
             
         else:
             return JsonResponse({"error": "Unsupported data source"}, status=400)
@@ -1172,7 +1305,7 @@ def send_rewards(request):
             return lb_response
 
         leaderboard = json.loads(lb_response.content)["leaderboard"]
-        group_by_field = data_settings.get("expression", {}).get("groupBy", "username")
+        group_by_field = data_settings.get("expression", {}).get("displayField", "username")
         source_type = data_settings.get("source")
         api_config = data_settings.get("api", {})
 
@@ -1282,8 +1415,10 @@ def connect_to_source(source_type, api_config):
             firebase_admin.initialize_app(cred)
         return firestore.client()
     elif source_type == "Sheet":
-        gc = gspread.service_account(filename="path_to_credentials.json")
-        return gc.open_by_url(api_config.get("url")).sheet1
+        sheet_id = api_config.get("url").split('/')[5]  # Extract sheet ID from URL
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        return csv_url
+    
     return None
 
 def get_user_email(source_type, data_source, group_field, username, email_field, api_config):
@@ -1305,10 +1440,43 @@ def get_user_email(source_type, data_source, group_field, username, email_field,
                 .stream()
             return next(docs).to_dict().get(email_field) if docs else None
         elif source_type == "Sheet":
-            records = data_source.get_all_records()
-            for record in records:
+            # Read data using pandas
+            df = pd.read_csv(data_source)
+            
+            # Ensure we have column headers
+            if df.empty or df.columns.empty:
+                return JsonResponse({"error": "Sheet is empty or missing headers"}, status=400)
+            
+            # Clean column headers - remove whitespace and special characters
+            df.columns = df.columns.str.strip()
+            
+            # Convert DataFrame to list of dicts
+            data = df.to_dict('records')
+            
+            # Clean up the data and ensure consistent format
+            cleaned_data = []
+            for row in data:
+                cleaned_row = {}
+                for key, value in row.items():
+                    # Only include non-empty values
+                    if pd.notna(value) and str(value).strip() != '':
+                        # Convert numeric types to match MongoDB format
+                        if isinstance(value, (int, float)):
+                            cleaned_row[key] = float(value) if isinstance(value, float) else int(value)
+                        else:
+                            cleaned_row[key] = str(value).strip()
+                if cleaned_row:  # Only include rows with data
+                    cleaned_data.append(cleaned_row)
+            
+            if not cleaned_data:
+                return JsonResponse({"error": "No valid data found in sheet"}, status=400)
+            
+            data = cleaned_data
+            for record in data:
                 if str(record.get(group_field, "")) == username:
+                    print(record.get(email_field))
                     return record.get(email_field)
+                
         return None
     except Exception as e:
         print(f"Error fetching email for {username}: {str(e)}")
