@@ -1120,6 +1120,9 @@ def create_checkout_session(request):
             user_id = data.get("user_id")
             print(user_id)
 
+            if not user_id:
+                return JsonResponse({"url": "https://competiboard.com/"})
+
             # Product price mapping for recurring subscriptions
             product_to_price_mapping = {
                 "prod_RmO52yWy4eNtNq": "price_1QspJAAszcsVQ3TAx8czqoUs",  # Recurring monthly price ID
